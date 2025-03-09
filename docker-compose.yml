@@ -1,0 +1,126 @@
+networks:
+  traefik:
+    external: true
+  iu-big-data-analytics:
+    external: true
+
+services:
+
+  # Container, der Temperatursensoren simuliert
+  sensor-data:
+    build: ./sensor-data
+    image: sensor-data:latest
+    container_name: sensor-data
+    hostname: sensor-data
+    restart: unless-stopped
+    networks:
+      - iu-big-data-analytics
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    labels:
+      - traefik.enable=false
+      - com.centurylinklabs.watchtower.enable=false
+
+
+  # /opt/bitnami/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic sensor-data
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    hostname: kafka
+    restart: unless-stopped
+    networks:
+      - iu-big-data-analytics
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+    labels:
+      - traefik.enable=false
+      - com.centurylinklabs.watchtower.enable=true
+
+
+  flink-jobmanager:
+    image: flink:1.17.2
+    container_name: flink-jobmanager
+    hostname: flink-jobmanager
+    restart: unless-stopped
+    command: jobmanager
+    networks:
+      - iu-big-data-analytics
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    labels:
+      - traefik.enable=false
+      - com.centurylinklabs.watchtower.enable=true
+
+
+  flink-taskmanager:
+    image: flink:1.17.2
+    container_name: flink-taskmanager
+    hostname: flink-taskmanager
+    restart: unless-stopped
+    command: taskmanager
+    networks:
+      - iu-big-data-analytics
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=2
+    labels:
+      - traefik.enable=false
+      - com.centurylinklabs.watchtower.enable=true
+
+
+  influxdb:
+    image: influxdb:latest
+    container_name: influxdb
+    hostname: influxdb
+    restart: unless-stopped
+    networks:
+      - iu-big-data-analytics
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=user
+      - DOCKER_INFLUXDB_INIT_PASSWORD=password
+      - DOCKER_INFLUXDB_INIT_ORG=my-org
+      - DOCKER_INFLUXDB_INIT_BUCKET=my-bucket
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=my-token
+    labels:
+      - traefik.enable=false
+      - com.centurylinklabs.watchtower.enable=true
+
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    hostname: grafana
+    restart: unless-stopped
+    networks:
+      - traefik
+      - iu-big-data-analytics
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # sudo chown -R 472:472 data/grafana
+      - ${PWD}/grafana:/var/lib/grafana
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`grafana.filser.io`)
+      - traefik.http.routers.grafana.middlewares=for-container@file
+      - com.centurylinklabs.watchtower.enable=true
